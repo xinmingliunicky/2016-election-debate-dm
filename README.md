@@ -1,4 +1,4 @@
-# Decide people’s political leanings based on their tweet posts (2020 Fall DM)
+# Decide people’s political leanings based on their tweet posts  
 
 * Team members: Xinming Liu, Jingyang Li, Xuezhi Xu
 
@@ -22,7 +22,7 @@ The R packages we used are all listed in the Rmd files. If you run the code chun
 The main packages used were "tm" for text mining, "caret" for supervised learning. Model-specific packages include "e1071" for Naive Bayes and SVM, "rpart" for classification trees, "ada" for AdaBoost, etc.
 
 ## Authors
-Xinming Liu (xil231@pitt.edu)  
+Xinming Liu  
 Jingyang Li  
 Xuezhi Xu
 
