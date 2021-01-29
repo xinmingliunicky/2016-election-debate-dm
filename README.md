@@ -23,7 +23,7 @@ The main packages used were "tm" for text mining, "caret" for supervised learnin
 
 ## Authors
 Xinming Liu (xil231@pitt.edu)  
-Jingyang Li 
+Jingyang Li  
 Xuezhi Xu
 
 ## Acknowledgments
