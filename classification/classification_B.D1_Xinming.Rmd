@@ -1,0 +1,373 @@
+---
+title: "classification_Xinming"
+author: "Xinming Liu"
+date: "11/27/2020"
+output: html_document
+---
+
+```{r document_setup, echo=F, message=F, warning=F}
+library(dplyr)
+library(ggplot2)
+theme_set(theme_bw()) # change the default ggplot theme to black-and-white
+library(lattice)
+
+library(MASS)
+library(caret)
+library(MLeval)
+library(arm)
+library(Hmisc)
+library(data.table)
+library(pROC)
+
+library(tm)
+library(slam)
+library(SnowballC)
+library(lsa)
+library(splitstackshape)
+library(RSpectra)
+library(NMF)
+
+library(C50)
+library(kernlab)
+library(mlbench)
+library(randomForest)
+library(caretEnsemble)
+library(klaR)
+library(nnet)
+
+library(plyr) # for recoding data
+library(ROCR) # for plotting roc
+library(class) # for knn
+library(e1071) # for NB and SVM
+library(rpart) # for decision tree
+library(ada) # for adaboost
+
+knitr::opts_chunk$set(
+  echo=T, ## show your R code chunk
+  message = F, ## hide the message
+  warning = F, ## hide the warning
+  autodep = T ## make sure your separate code chunks can find the dependencies (from other code chunk)
+)
+
+# clean corpus
+clean_corpus <- function(corpus){
+  corpus.tmp = tm_map(corpus,removePunctuation)
+  corpus.tmp = tm_map(corpus.tmp,stripWhitespace)
+  corpus.tmp = tm_map(corpus.tmp,tolower)
+  corpus.tmp = tm_map(corpus.tmp,removeWords,stopwords("english"))
+  corpus.tmp = tm_map(corpus.tmp,stemDocument,language="english")
+  return(corpus.tmp)
+}
+
+## fast LSA
+fast_lsa <- function(dtm, k){
+  dtm.tfidf = lw_tf(as.matrix(dtm)) * gw_idf(as.matrix(dtm))
+  S = svds(as.matrix(dtm.tfidf), k, nu=k, nv=k)
+  return(S$u %*% diag(S$d[1:k]) %*% t(S$v))
+}
+```
+
+Set B - Debate 1
+
+```{r}
+## SetB Preprocessing
+users <- read.csv("user_setB/users.csv", stringsAsFactors = FALSE)
+#head(users)
+tweets <- read.csv("user_setB/tweets_debate1.csv", stringsAsFactors = FALSE)
+# tweets2 <- read.csv("user_setB/tweets_debate2.csv", stringsAsFactors = FALSE)
+# tweets3 <- read.csv("user_setB/tweets_debate3.csv", stringsAsFactors = FALSE)
+# tweets4 <- read.csv("user_setB/tweets_debateVP.csv", stringsAsFactors = FALSE)
+# tweets <- rbind(tweets1, tweets2, tweets3, tweets4)
+#head(tweets)
+tweets$userID <- as.numeric(tweets$userID)
+data <- data.table(users, key="userID")[
+  data.table(tweets, key="userID"),
+  allow.cartesian=TRUE
+]
+data <- subset(data, follow_candidate=="trump" | follow_candidate=="clinton")
+#head(data)
+# use <- data.frame(data$text, factor(data$follow_candidate), stringsAsFactors = FALSE)
+# colnames(use) <- c("text", "follow_candidate")
+use <- data.table(text=data$text,
+           follow_candidate=data$follow_candidate,
+           stringsAsFactors = FALSE)
+#head(use)
+```
+
+```{r}
+## Performing LSA using RSpectra & irlba still reaches the memory limit
+## Use 1% stratified sampling instead.
+set.seed(800)
+use <- stratified(use, c("follow_candidate"), 0.01)
+```
+
+
+```{r}
+## Create DocumentTermMatrix
+corpus <- Corpus(VectorSource(use$text))
+corpus = clean_corpus(corpus)
+#td.mat = TermDocumentMatrix(corpus)
+dt.mat = DocumentTermMatrix(corpus)
+## dt.mat is not a matrix here
+```
+
+
+```{r}
+## Feature words extraction (this may create NA values) due to limited memory
+dt.mat.use = removeSparseTerms(dt.mat, 0.90)
+#inspect(dt.mat.use)
+## Sparsity = 0.93 (10 terms remaining) ~ 0.95 (13 terms remaining) 
+```
+
+```{r}
+## Attach class label
+alldata <- as.matrix(dt.mat.use)
+alldata <- cbind(alldata, use$follow_candidate)
+colnames(alldata)[ncol(alldata)] <- "Class"
+## Class=1 for Democrats, Class=2 for Republican
+alldata <- as.data.frame(alldata)
+alldata$Class <- as.factor(alldata$Class)
+levels(alldata$Class) <- c("Democrats",  "Republican")
+#head(alldata)
+```
+
+```{r}
+## Drop levels of terms to avoid further error in training and testing
+## Since createDataPartition may not make sure all levels appear in both training & test set
+alldata[alldata!="1" & alldata!="0" & alldata!="Democrats" & alldata!="Republican"] <- "1"
+```
+
+
+Use 10-fold CV with 70% data for training, 30% data for testing
+
+```{r}
+## Train-Test Split
+set.seed(800)
+## 70% for training, 30% for testing
+TrainingDataIndex <- createDataPartition(alldata$Class, p=0.7, list = FALSE)
+trainingData <- alldata[TrainingDataIndex,]
+testData <- alldata[-TrainingDataIndex,]
+## 10-fold CV (cannot do repeatedcv due to CPU performance)
+TrainingParameters <- trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary)
+```
+
+Classification using kNN (too many ties)
+
+```{r}
+# ## Training
+# fit <- train(Class ~ ., data = trainingData,
+#                  method = "knn",
+#                  trControl= TrainingParameters,
+#                  tuneGrid = expand.grid(k = seq(1, 10, length = 10)),
+#                  preProcess = c("scale","center"),
+#                  na.action = na.omit
+# )
+# fit
+# fit$bestTune
+# 
+# ## Testing
+# pred <- predict(fit, testData)
+# 
+# ## Evaluation
+# confusionMatrix(pred, testData$Class)
+# 
+# ## Rank terms by importance
+# importance <- varImp(fit, scale=FALSE)
+# plot(importance)
+```
+
+Classification using SVM
+
+```{r}
+set.seed(8001)
+## Using linear kernel
+
+## Training
+fit.lSVM <- train(Class ~ ., data = trainingData,
+                 method = "svmLinear",
+                 metric = "ROC",
+                 trControl= TrainingParameters,
+                 tuneGrid = expand.grid(C = seq(0.1, 1, length = 9)),
+                 preProcess = c("scale","center"),
+                 na.action = na.omit
+)
+fit.lSVM
+fit.lSVM$bestTune
+fit.lSVM$x
+
+## Testing
+pred.lSVM <- predict(fit.lSVM, testData, type="prob")
+
+## Evaluation
+#confusionMatrix(pred, testData$Class)
+result.roc <- roc(testData$Class, pred.lSVM$Democrats)
+plot(result.roc, print.thres="best", print.thres.best.method="closest.topleft")
+result.coords <- coords(result.roc, "best", best.method="closest.topleft", ret=c("threshold", "accuracy"))
+print(result.coords)
+```
+
+
+```{r}
+set.seed(8002)
+## Using polynomial kernel
+
+## Training
+## Due to CPU performance, cannot apply a grid to tune parameters
+fit.pSVM <- train(Class ~ ., data = trainingData,
+                 method = "svmPoly",
+                 metric = "ROC",
+                 trControl= TrainingParameters,
+                 preProcess = c("scale","center"),
+                 na.action = na.omit
+)
+fit.pSVM
+fit.pSVM$bestTune
+
+## Testing
+pred.pSVM <- predict(fit.pSVM, testData, type="prob")
+
+## Evaluation
+#confusionMatrix(pred, testData$Class)
+result.roc <- roc(testData$Class, pred.pSVM$Democrats)
+plot(result.roc, print.thres="best", print.thres.best.method="closest.topleft")
+result.coords <- coords(result.roc, "best", best.method="closest.topleft", ret=c("threshold", "accuracy"))
+print(result.coords)
+```
+
+
+```{r}
+set.seed(8003)
+## Using radial basis kernel
+
+## Training
+## Due to CPU performance, cannot apply a grid to tune parameters
+fit.rSVM <- train(Class ~ ., data = trainingData,
+                 method = "svmRadial",
+                 metric = "ROC",
+                 trControl= TrainingParameters,
+                 preProcess = c("scale","center"),
+                 na.action = na.omit
+)
+fit.rSVM
+fit.rSVM$bestTune
+
+## Testing
+pred.rSVM <- predict(fit.rSVM, testData, type="prob")
+
+## Evaluation
+#confusionMatrix(pred, testData$Class)
+result.roc <- roc(testData$Class, pred.rSVM$Democrats)
+plot(result.roc, print.thres="best", print.thres.best.method="closest.topleft")
+result.coords <- coords(result.roc, "best", best.method="closest.topleft", ret=c("threshold", "accuracy"))
+print(result.coords)
+```
+
+Classification using Naive Bayes
+
+```{r}
+set.seed(8004)
+## Training
+fit.NB <- train(trainingData[,-9], trainingData$Class,
+                    method = "nb",
+                    metric = "ROC",
+                    preProcess=c("scale","center"),
+                    trControl= TrainingParameters,
+                    na.action = na.omit
+)
+fit.NB
+
+## Testing
+pred.NB <- predict(fit.NB, testData, type="prob")
+
+## Evaluation
+#confusionMatrix(pred, testData$Class)
+result.roc <- roc(testData$Class, pred.NB$Democrats)
+plot(result.roc, print.thres="best", print.thres.best.method="closest.topleft")
+result.coords <- coords(result.roc, "best", best.method="closest.topleft", ret=c("threshold", "accuracy"))
+print(result.coords)
+```
+
+Classification using Logistic Regression
+
+```{r}
+set.seed(8005)
+## Training
+fit.LR <- train(Class ~ ., data = trainingData, 
+                    method = "glm",
+                    metric = "ROC",
+                    preProcess=c("scale","center"),
+                    trControl= TrainingParameters,
+                    na.action = na.omit
+)
+fit.LR
+
+## Testing
+pred.LR <- predict(fit.LR, testData, type="prob")
+
+## Evaluation
+#confusionMatrix(pred, testData$Class)
+result.roc <- roc(testData$Class, pred.LR$Democrats)
+plot(result.roc, print.thres="best", print.thres.best.method="closest.topleft")
+result.coords <- coords(result.roc, "best", best.method="closest.topleft", ret=c("threshold", "accuracy"))
+print(result.coords)
+
+## Rank terms by importance
+importance <- varImp(fit.LR, scale=FALSE)
+plot(importance)
+```
+
+Classification using Decision Tree
+
+```{r}
+set.seed(8006)
+## Training
+fit.DT <- train(Class ~ ., data = trainingData, 
+                    method = "rpart",
+                    metric = "ROC",
+                    preProcess=c("scale","center"),
+                    trControl= TrainingParameters,
+                    na.action = na.omit,
+                    control = rpart.control(minsplit = 1, minbucket = 1)
+)
+fit.DT
+
+## Testing
+pred.DT <- predict(fit.DT, testData, type="prob")
+
+## Evaluation
+#confusionMatrix(pred, testData$Class)
+result.roc <- roc(testData$Class, pred.DT$Democrats)
+plot(result.roc, print.thres="best", print.thres.best.method="closest.topleft")
+result.coords <- coords(result.roc, "best", best.method="closest.topleft", ret=c("threshold", "accuracy"))
+print(result.coords)
+
+plot(fit.DT$finalModel, uniform=TRUE, main="Classification Tree")
+text(fit.DT$finalModel, use.n.=TRUE, all=TRUE, cex=.8)
+```
+
+Classification using AdaBoost
+
+```{r}
+set.seed(8007)
+## Training
+fit.ADA <- train(trainingData[,-9], trainingData$Class,
+                    method = "ada",
+                    metric = "ROC",
+                    preProcess=c("scale","center"),
+                    trControl= TrainingParameters,
+                    na.action = na.omit
+)
+
+fit.ADA
+
+## Testing
+pred.ADA <- predict(fit.ADA, testData, type="prob")
+
+## Evaluation
+#confusionMatrix(pred, testData$Class)
+result.roc <- roc(testData$Class, pred.ADA$Democrats)
+plot(result.roc, print.thres="best", print.thres.best.method="closest.topleft")
+result.coords <- coords(result.roc, "best", best.method="closest.topleft", ret=c("threshold", "accuracy"))
+print(result.coords)
+```
+

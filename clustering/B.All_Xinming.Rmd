@@ -1,0 +1,128 @@
+---
+title: "clustering_Xinming"
+author: "Xinming Liu"
+date: "11/26/2020"
+output: html_document
+---
+
+```{r document_setup, echo=F, message=F, warning=F}
+library(dplyr)
+library(ggplot2)
+theme_set(theme_bw()) # change the default ggplot theme to black-and-white
+
+library(MASS)
+library(caret)
+library(data.table)
+
+library(tm)
+library(slam)
+library(SnowballC)
+library(lsa)
+library(NMF)
+library(proxy)
+
+library(cluster)
+library(stats)
+
+library(plyr) # for recoding data
+library(ROCR) # for plotting roc
+library(class) # for knn
+library(e1071) # for NB and SVM
+library(rpart) # for decision tree
+library(ada) # for adaboost
+
+knitr::opts_chunk$set(
+  echo=T, ## show your R code chunk
+  message = F, ## hide the message
+  warning = F, ## hide the warning
+  autodep = T ## make sure your separate code chunks can find the dependencies (from other code chunk)
+)
+
+# clean corpus
+clean_corpus <- function(corpus){
+  corpus.tmp = tm_map(corpus,removePunctuation)
+  corpus.tmp = tm_map(corpus.tmp,stripWhitespace)
+  corpus.tmp = tm_map(corpus.tmp,tolower)
+  corpus.tmp = tm_map(corpus.tmp,removeWords,stopwords("english"))
+  corpus.tmp = tm_map(corpus.tmp,stemDocument,language="english")
+  return(corpus.tmp)
+}
+
+# fast distance matrix calculation of tm's TermDocumentMatrix output
+calc_dist <- function(tdm){
+  return(
+    1 - crossprod_simple_triplet_matrix(tdm)/(sqrt(col_sums(tdm^2) %*% t(col_sums(tdm^2))))
+  )
+}
+```
+
+See pipelines here:
+https://medium.com/@SAPCAI/text-clustering-with-r-an-introduction-for-data-scientists-c406e7454e76
+
+Set B - Whole Set
+
+```{r}
+## SetB Preprocessing
+b.users <- read.csv("user_setB/users.csv", stringsAsFactors = FALSE)
+#head(b.users)
+b.tweets1 <- read.csv("user_setB/tweets_debate1.csv", stringsAsFactors = FALSE)
+b.tweets2 <- read.csv("user_setB/tweets_debate2.csv", stringsAsFactors = FALSE)
+b.tweets3 <- read.csv("user_setB/tweets_debate3.csv", stringsAsFactors = FALSE)
+b.tweets4 <- read.csv("user_setB/tweets_debateVP.csv", stringsAsFactors = FALSE)
+b.tweets <- rbind(b.tweets1, b.tweets2, b.tweets3, b.tweets4)
+#head(b.tweets)
+b.data <- data.table(b.users, key="userID")[
+  data.table(b.tweets, key="userID"),
+  allow.cartesian=TRUE
+]
+b.data <- subset(b.data, follow_candidate=="trump" | follow_candidate=="clinton")
+#head(b.data)
+b.use <- data.frame(b.data$text, factor(b.data$follow_candidate), stringsAsFactors = FALSE)
+colnames(b.use) <- c("text", "follow_candidate")
+#head(b.use)
+```
+
+```{r}
+## Create DocumentTermMatrix
+b.corpus <- Corpus(VectorSource(b.use$text))
+b.corpus = clean_corpus(b.corpus)
+#b.td.mat = TermDocumentMatrix(b.corpus)
+b.dt.mat = DocumentTermMatrix(b.corpus)
+## b.dt.mat is not a matrix here
+
+#b.dist.mat = calc_dist(b.td.mat)
+## b.dist.mat is not a matrix here
+```
+
+```{r}
+## Apply TF-IDF weighting
+b.dt.mat.tfidf <- weightTfIdf(b.dt.mat)
+
+## Aggressive feature words extraction (this may create NA values)
+b.dt.mat.tfidf.use = removeSparseTerms(b.dt.mat.tfidf, 0.85)
+## The most frequent words are "Clinton", "debate" and "@realDonaldTrump"
+
+inspect(b.dt.mat.tfidf.use)
+## The two most frequent words are "debate" and "Trump"
+
+b.dt.mat.tfidf.use = as.matrix(b.dt.mat.tfidf.use)
+```
+
+With 4 most frequent terms (Clinton, debate, @realDonaldTrump and Trump), try K-Means k=3
+
+```{r}
+## Due to limited memory to calculate distance matrix, we will only do k-means
+## K-Means clustering
+set.seed(1005)
+b.clustering.kmeans <- kmeans(b.dt.mat.tfidf.use, centers=3, nstart=10)
+#b.clustering.kmeans
+b.clusters <- b.clustering.kmeans$cluster
+```
+
+
+```{r}
+clusplot(b.dt.mat.tfidf.use, b.clusters, labels = 5, main = "K-Means clustering of PC1 & PC2 (k=3, Sparsity=76%)")
+```
+
+In the whole SetB, K-Means k=3 is still not satisfactory to separate the frequent terms. Yet due to lack of state information of users, we cannot perform clustering on a specific state in SetB. (The user-provided information seems too irregular to be factorized)
+

@@ -1,0 +1,146 @@
+---
+title: "clustering_Xinming"
+author: "Xinming Liu"
+date: "11/25/2020"
+output: html_document
+---
+
+```{r document_setup, echo=F, message=F, warning=F}
+library(dplyr)
+library(ggplot2)
+theme_set(theme_bw()) # change the default ggplot theme to black-and-white
+
+library(MASS)
+library(caret)
+library(data.table)
+
+library(tm)
+library(slam)
+library(SnowballC)
+library(lsa)
+library(NMF)
+library(wordcloud)
+
+library(plyr) # for recoding data
+library(ROCR) # for plotting roc
+library(class) # for knn
+library(e1071) # for NB and SVM
+library(rpart) # for decision tree
+library(ada) # for adaboost
+
+knitr::opts_chunk$set(
+  echo=T, ## show your R code chunk
+  message = F, ## hide the message
+  warning = F, ## hide the warning
+  autodep = T ## make sure your separate code chunks can find the dependencies (from other code chunk)
+)
+
+# clean corpus
+clean_corpus <- function(corpus){
+  corpus.tmp = tm_map(corpus,removePunctuation)
+  corpus.tmp = tm_map(corpus.tmp,stripWhitespace)
+  corpus.tmp = tm_map(corpus.tmp,tolower)
+  corpus.tmp = tm_map(corpus.tmp,removeWords,stopwords("english"))
+  corpus.tmp = tm_map(corpus.tmp,stemDocument,language="english")
+  return(corpus.tmp)
+}
+
+# fast distance matrix calculation of tm's TermDocumentMatrix output
+calc_dist <- function(tdm){
+  return(
+    1 - crossprod_simple_triplet_matrix(tdm)/(sqrt(col_sums(tdm^2) %*% t(col_sums(tdm^2))))
+  )
+}
+```
+
+
+Set A - Debate VP - AZ
+
+```{r}
+## Preprocessing
+users <- read.csv("user_setA/users.csv", stringsAsFactors = FALSE)
+#head(users)
+tweets <- read.csv("user_setA/tweets_debateVP.csv", stringsAsFactors = FALSE)
+#head(tweets)
+data <- data.table(users, key="userID")[
+  data.table(tweets, key="userID"),
+  allow.cartesian=TRUE
+]
+
+data <- subset(data, party=='D' | party=='R')
+
+## Swing state
+data <- subset(data, state_code=="AZ")
+
+#head(a.data)
+use <- data.frame(data$text, factor(data$party), stringsAsFactors = FALSE)
+colnames(use) <- c("text", "party")
+#head(use)
+```
+
+```{r}
+## Create TermDocumentMatrix
+corpus <- Corpus(VectorSource(use$text))
+corpus = clean_corpus(corpus)
+td.mat = as.matrix(TermDocumentMatrix(corpus))
+
+#td.mat = removeSparseTerms(td.mat, 0.7)
+## this will create NA values
+
+#dist.mat = calc_dist(td.mat)
+## dist.mat is not a matrix here
+```
+
+Clustering visualization based on TF-IDF
+
+```{r}
+td.mat.tfidf = lw_tf(td.mat) * gw_idf(td.mat)
+dist.mat.tfidf = dist(t(as.matrix(td.mat.tfidf)))
+#dist.mat.tfidf[!is.finite(dist.mat.tfidf)] <- 0
+doc.mds.tfidf = cmdscale(dist.mat.tfidf, k = 2)
+vis.tfidf = data.frame(x = doc.mds.tfidf[, 1], y = doc.mds.tfidf[, 2], party = use$party, id = row.names(use))
+ggplot(vis.tfidf, aes(x = x, y = y, color=party)) +
+  geom_point() + geom_text(aes(x = x, y = y - 0.2, label = id)) + scale_color_manual(values = c("#146EE3","#EB3434")) + ggtitle("VP Debate AZ clustering based on TF-IDF") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Clustering visualization based on LSA
+
+```{r}
+lsa.space = lsa(td.mat.tfidf,dims=2)
+dist.mat.lsa = dist(t(as.textmatrix(lsa.space)))
+doc.mds.lsa = cmdscale(dist.mat.lsa, k = 2)
+vis.lsa = data.frame(x = doc.mds.lsa[, 1], y = doc.mds.lsa[, 2], party = use$party, id = row.names(use))
+ggplot(vis.lsa, aes(x = x, y = y, color=party)) +
+  geom_point() + geom_text(aes(x = x, y = y - 0.2, label = id)) + scale_color_manual(values = c("#146EE3","#EB3434")) + ggtitle("VP Debate AZ clustering based on LSA") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Clustering visualization based on NMF
+
+```{r}
+set.seed(101)
+res = nmf(td.mat, 2,"lee")
+V.hat = fitted(res)
+w = basis(res)
+h = coef(res)
+#dim(h)
+doc.nmf = data.frame(t(h))
+features = cbind(doc.nmf$X1, doc.nmf$X2, doc.nmf$X3)
+vis.nmf = data.frame(x = features[, 1], y = features[, 2], party = use$party, id = row.names(use))
+ggplot(vis.nmf, aes(x = x, y = y, color=party)) +
+  geom_point() + geom_text(aes(x = x, y = y - 0.2, label = id)) + scale_color_manual(values = c("#146EE3","#EB3434")) + ggtitle("VP Debate AZ clustering based on NMF") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Word Cloud
+
+```{r}
+m = as.matrix(td.mat)
+v = sort(rowSums(m), decreasing=TRUE)
+words = names(v)
+wc = data.frame(word=words, freq=v)
+#wc[1:3,]
+wordcloud(wc$word, wc$freq, min.freq=5)
+```
+

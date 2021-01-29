@@ -1,0 +1,3 @@
+The dataset used is simply the dataset provided in http://www.yurulin.com/class/spring2017_datamining/data/twitter_debate2016/
+
+However, due to file size limit of GitHub, we were unable to upload them again to our repository.

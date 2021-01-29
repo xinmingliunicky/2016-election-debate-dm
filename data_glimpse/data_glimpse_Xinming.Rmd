@@ -1,0 +1,52 @@
+---
+title: "data_glimpse"
+author: "Xinming Liu"
+date: "11/23/2020"
+output: html_document
+---
+
+```{r document_setup, echo=F, message=F, warning=F}
+# This chunk can include things you need for the rest of the document
+library(dplyr)
+library('ggplot2') ## most of the time you will need ggplot
+theme_set(theme_bw()) # change the default ggplot theme to black-and-white
+
+knitr::opts_chunk$set(
+  echo=T, ## show your R code chunk
+  message = F, ## hide the message
+  warning = F, ## hide the warning
+  autodep = T ## make sure your separate code chunks can find the dependencies (from other code chunk)
+)
+```
+
+
+```{r}
+A_user = read.csv("user_setA/users.csv")
+A_user = subset(A_user, party=='D' | party=='R')
+A_party = table(A_user$party)
+pie(A_party, labels = A_party, col = c("blue", "red"), main = "SetA - Registered party of users")
+legend("topright", c("Democrats", "Republican"), fill = c("blue", "red"))
+
+B_user = read.csv("user_setB/users.csv")
+B_user = subset(B_user, follow_candidate=="clinton" | follow_candidate=="trump")
+B_party = table(B_user$follow_candidate)
+pie(B_party, labels = B_party, col = c("blue", "red"), main = "SetB - Candidate followed by users")
+legend("topright", c("Clinton", "Trump"), fill = c("blue", "red"))
+```
+```{r}
+A_user_PA = subset(A_user, state_code=="PA")
+A_party_PA = table(A_user_PA$party)
+pie(A_party_PA, labels = A_party_PA, col = c("blue", "red"), main = "SetA - PA registered party of users")
+legend("topright", c("Democrats", "Republican"), fill = c("blue", "red"))
+
+A_user_FL = subset(A_user, state_code=="FL")
+A_party_FL = table(A_user_FL$party)
+pie(A_party_FL, labels = A_party_FL, col = c("blue", "red"), main = "SetA - FL registered party of users")
+legend("topright", c("Democrats", "Republican"), fill = c("blue", "red"))
+
+A_user_AZ = subset(A_user, state_code=="AZ")
+A_party_AZ = table(A_user_AZ$party)
+pie(A_party_AZ, labels = A_party_AZ, col = c("blue", "red"), main = "SetA - AZ registered party of users")
+legend("topright", c("Democrats", "Republican"), fill = c("blue", "red"))
+```
+

@@ -1,0 +1,135 @@
+---
+title: "clustering_Xinming"
+author: "Xinming Liu"
+date: "11/26/2020"
+output: html_document
+---
+
+```{r document_setup, echo=F, message=F, warning=F}
+library(dplyr)
+library(ggplot2)
+theme_set(theme_bw()) # change the default ggplot theme to black-and-white
+
+library(MASS)
+library(caret)
+library(data.table)
+
+library(tm)
+library(slam)
+library(SnowballC)
+library(lsa)
+library(NMF)
+library(proxy)
+
+library(cluster)
+library(stats)
+
+library(plyr) # for recoding data
+library(ROCR) # for plotting roc
+library(class) # for knn
+library(e1071) # for NB and SVM
+library(rpart) # for decision tree
+library(ada) # for adaboost
+
+knitr::opts_chunk$set(
+  echo=T, ## show your R code chunk
+  message = F, ## hide the message
+  warning = F, ## hide the warning
+  autodep = T ## make sure your separate code chunks can find the dependencies (from other code chunk)
+)
+
+# clean corpus
+clean_corpus <- function(corpus){
+  corpus.tmp = tm_map(corpus,removePunctuation)
+  corpus.tmp = tm_map(corpus.tmp,stripWhitespace)
+  corpus.tmp = tm_map(corpus.tmp,tolower)
+  corpus.tmp = tm_map(corpus.tmp,removeWords,stopwords("english"))
+  corpus.tmp = tm_map(corpus.tmp,stemDocument,language="english")
+  return(corpus.tmp)
+}
+
+# fast distance matrix calculation of tm's TermDocumentMatrix output
+calc_dist <- function(tdm){
+  return(
+    1 - crossprod_simple_triplet_matrix(tdm)/(sqrt(col_sums(tdm^2) %*% t(col_sums(tdm^2))))
+  )
+}
+```
+
+See pipelines here:
+https://medium.com/@SAPCAI/text-clustering-with-r-an-introduction-for-data-scientists-c406e7454e76
+
+
+Set A - All PA
+
+```{r}
+## SetA Preprocessing
+a.users <- read.csv("user_setA/users.csv", stringsAsFactors = FALSE)
+#head(a.users)
+a.tweets1 <- read.csv("user_setA/tweets_debate1.csv", stringsAsFactors = FALSE)
+a.tweets2 <- read.csv("user_setA/tweets_debate2.csv", stringsAsFactors = FALSE)
+a.tweets3 <- read.csv("user_setA/tweets_debate3.csv", stringsAsFactors = FALSE)
+a.tweets4 <- read.csv("user_setA/tweets_debateVP.csv", stringsAsFactors = FALSE)
+a.tweets <- rbind(a.tweets1, a.tweets2, a.tweets3, a.tweets4)
+#head(a.tweets)
+a.data <- data.table(a.users, key="userID")[
+  data.table(a.tweets, key="userID"),
+  allow.cartesian=TRUE
+]
+a.data <- subset(a.data, party=='D' | party=='R')
+a.data <- subset(a.data, state_code=="PA")
+#head(a.data)
+a.use <- data.frame(a.data$text, factor(a.data$party), stringsAsFactors = FALSE)
+colnames(a.use) <- c("text", "party")
+#head(a.use)
+```
+
+```{r}
+## Create DocumentTermMatrix
+a.corpus <- Corpus(VectorSource(a.use$text))
+a.corpus = clean_corpus(a.corpus)
+#a.td.mat = TermDocumentMatrix(a.corpus)
+a.dt.mat = DocumentTermMatrix(a.corpus)
+## a.dt.mat is not a matrix here
+
+#a.dist.mat = calc_dist(a.td.mat)
+## a.dist.mat is not a matrix here
+```
+
+```{r}
+## Apply TF-IDF weighting
+a.dt.mat.tfidf <- weightTfIdf(a.dt.mat)
+
+## Aggressive feature words extraction (this may create NA values)
+a.dt.mat.tfidf.use = removeSparseTerms(a.dt.mat.tfidf, 0.9)
+## Maximal Sparsity = 90%
+
+inspect(a.dt.mat.tfidf.use)
+## The 4 most frequent words are "debate", "#DebateNight", "Hillary" and "Trump"
+
+a.dt.mat.tfidf.use = as.matrix(a.dt.mat.tfidf.use)
+```
+
+With 4 most frequent terms ("debate", "#DebateNight", "Hillary" and "Trump"), try K-Means k=3
+
+```{r}
+## Due to limited memory to calculate distance matrix, we will only do k-means
+## K-Means clustering
+set.seed(1004)
+a.clustering.kmeans <- kmeans(a.dt.mat.tfidf.use, centers=3, nstart=10)
+#a.clustering.kmeans
+a.clusters <- a.clustering.kmeans$cluster
+```
+
+```{r}
+## 2D visualization of "#DebateNight" and "Hillary"
+plot(a.dt.mat.tfidf.use, col=a.clusters, main = "2D visualization of Rank.2 & Rank.3 terms (k=3, Sparsity=82%)")
+points(a.clustering.kmeans$centers, col = 1:2, pch = 8, cex = 5)
+```
+
+```{r}
+## A more generic visualization using clusplot
+clusplot(a.dt.mat.tfidf.use, a.clusters, labels = 5 , main = "K-Means clustering of PC1 & PC2 (k=3, Sparsity=82%)")
+```
+Now we can see some sort of clusters: neutral words, Democrats, Republican
+
