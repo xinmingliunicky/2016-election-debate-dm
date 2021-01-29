@@ -1,7 +1,6 @@
 # Decide people’s political leanings based on their tweet posts (2020 Fall DM)
 
 * Team members: Xinming Liu, Jingyang Li, Xuezhi Xu
-* Project paper: https://github.com/class-data-mining-master/2020-fall-dm-project-team12-election/blob/main/data_mining_project_paper.pdf
 
 
 
@@ -24,8 +23,8 @@ The main packages used were "tm" for text mining, "caret" for supervised learnin
 
 ## Authors
 Xinming Liu (xil231@pitt.edu)  
-Jingyang Li (jil281@pitt.edu)  
-Xuezhi Xu (xux15@pitt.edu)
+Jingyang Li 
+Xuezhi Xu
 
 ## Acknowledgments
 Thanks to our Prof. Lin for providing the [dataset](http://www.yurulin.com/class/spring2017_datamining/data/twitter_debate2016/).    
